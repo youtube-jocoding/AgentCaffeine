@@ -1,0 +1,12 @@
+.DS_Store
+
+# Build outputs
+AgentCaffeine.app/
+AgentCaffeine-*.dmg
+AgentCaffeine.zip
+
+# Xcode / Swift transient files
+.build/
+DerivedData/
+xcuserdata/
+*.xcuserstate

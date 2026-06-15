@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>AgentCaffeine</string>
+    <key>CFBundleDisplayName</key>
+    <string>AgentCaffeine</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.jocoding.agentcaffeine</string>
+    <key>CFBundleExecutable</key>
+    <string>AgentCaffeine</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 jocoding</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>잠자기 방지 설정을 변경하기 위해 관리자 권한이 필요합니다.</string>
+</dict>
+</plist>
