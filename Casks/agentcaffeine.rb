@@ -5,10 +5,10 @@ cask "agentcaffeine" do
   version "1.0"
   sha256 "PLACEHOLDER_SHA256" # notarize.sh 출력의 SHA256 값
 
-  url "https://github.com/PLACEHOLDER_GITHUB/AgentCaffeine/releases/download/v#{version}/AgentCaffeine-#{version}.dmg"
+  url "https://github.com/youtube-jocoding/AgentCaffeine/releases/download/v#{version}/AgentCaffeine-#{version}.dmg"
   name "AgentCaffeine"
   desc "Keep your Mac awake while AI agents run — even with the lid closed"
-  homepage "https://github.com/PLACEHOLDER_GITHUB/AgentCaffeine"
+  homepage "https://github.com/youtube-jocoding/AgentCaffeine"
 
   app "AgentCaffeine.app"
 
