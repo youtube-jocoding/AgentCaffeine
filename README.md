@@ -156,4 +156,4 @@ IOKit `IOPMCopyAssertionsByProcess()`로 현재 잠자기를 막는 power assert
 
 ## 라이선스
 
-[MIT](LICENSE) © jocoding — 자유롭게 쓰고, 고치고, 배포하세요.
+[Apache License 2.0](LICENSE) © 2026 jocoding — 자유롭게 쓰고·고치고·배포할 수 있으며, 특허·상표 보호 조항이 포함됩니다.
