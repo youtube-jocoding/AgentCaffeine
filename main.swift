@@ -1,10 +1,31 @@
 import Cocoa
+import IOKit.pwr_mgt
+import Darwin
 
 // 루트 watchdog에게 "지금 해제하라"고 알리는 신호 파일.
 // 앱(사용자 권한)이 생성하고, watchdog(루트)가 감지 후 삭제한다.
 let kReleaseFlagPath = "/tmp/com.jocoding.agentcaffeine.release"
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+// IOPMCopyAssertionsByProcess가 돌려주는 per-assertion 딕셔너리의 키/값.
+// (CFSTR 매크로는 Swift로 임포트되지 않으므로 원시 문자열을 직접 쓴다.)
+private let kAssertTypeKey = "AssertType"
+private let kAssertNameKey = "AssertName"
+private let kSleepBlockingTypes: Set<String> = [
+    "PreventUserIdleSystemSleep",   // idle 시스템 잠자기 차단 (caffeinate -i 등)
+    "NoIdleSleepAssertion",         // 동일 계열 (Electron 앱 다수)
+    "PreventSystemSleep",           // 시스템 잠자기 차단 (caffeinate -s)
+    "PreventUserIdleDisplaySleep",  // 화면 잠자기 차단 → 화면 켜진 동안 잠 못 듦
+]
+
+/// 잠자기를 막고 있는 프로세스 한 건.
+struct SleepBlocker {
+    let pid: pid_t
+    let appName: String
+    let detail: String
+    let quittable: Bool
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
     var enabled = false
     let toggleItem = NSMenuItem(title: "잠자기 방지 켜기", action: #selector(toggle), keyEquivalent: "")
@@ -13,8 +34,59 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         let menu = NSMenu()
+        menu.delegate = self          // 메뉴 열 때마다 assertion 목록을 갱신한다
+        statusItem.menu = menu
+
+        // 시작 시 자가 치유: 이전 세션이 비정상 종료(재부팅 등)되어 disablesleep가
+        // 켜진 채 남아 있으면 사용자에게 알리고 정리한다. watchdog가 살아 있었다면 이미 0이다.
+        cleanupStaleReleaseFlag()
+        selfHealIfStuck()
+        populate(menu)
+    }
+
+    // MARK: - 메뉴 구성
+
+    /// 메뉴를 열기 직전마다 호출 — "잠자기 막는 중" 목록을 실시간으로 다시 그린다.
+    func menuWillOpen(_ menu: NSMenu) {
+        populate(menu)
+    }
+
+    func populate(_ menu: NSMenu) {
+        menu.removeAllItems()
+
         toggleItem.target = self
         menu.addItem(toggleItem)
+        menu.addItem(NSMenuItem.separator())
+
+        // --- 지금 잠자기를 막는 중 ---
+        let header = NSMenuItem(title: "지금 잠자기를 막는 중", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        let blockers = sleepBlockers()
+        if blockers.isEmpty {
+            let none = NSMenuItem(title: "   (없음 — 정상적으로 잠들 수 있음)", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        } else {
+            for b in blockers {
+                if b.quittable {
+                    let item = NSMenuItem(
+                        title: "   \(b.appName)  —  \(b.detail)",
+                        action: #selector(quitBlocker(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.tag = Int(b.pid)
+                    item.toolTip = "클릭하면 이 앱을 종료해 잠자기 방지를 해제합니다"
+                    menu.addItem(item)
+                } else {
+                    let item = NSMenuItem(
+                        title: "   \(b.appName)  —  \(b.detail) · 종료 불가",
+                        action: nil, keyEquivalent: "")
+                    item.isEnabled = false
+                    menu.addItem(item)
+                }
+            }
+        }
         menu.addItem(NSMenuItem.separator())
 
         let info = NSMenuItem(title: "Agent가 도는 동안 덮개를 닫아도 잠들지 않습니다", action: nil, keyEquivalent: "")
@@ -25,17 +97,83 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(warn)
         menu.addItem(NSMenuItem.separator())
 
-        let quit = NSMenuItem(title: "종료", action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
-        statusItem.menu = menu
+        let quitItem = NSMenuItem(title: "종료", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
 
-        // 시작 시 자가 치유: 이전 세션이 비정상 종료(재부팅 등)되어 disablesleep가
-        // 켜진 채 남아 있으면 사용자에게 알리고 정리한다. watchdog가 살아 있었다면 이미 0이다.
-        cleanupStaleReleaseFlag()
-        selfHealIfStuck()
         updateUI()
     }
+
+    // MARK: - 잠자기 막는 프로세스 조회/종료
+
+    /// 현재 잠자기를 막고 있는 프로세스 목록을 PID 기준으로 묶어 돌려준다.
+    func sleepBlockers() -> [SleepBlocker] {
+        var cf: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&cf) == kIOReturnSuccess,
+              let cfDict = cf?.takeRetainedValue() else { return [] }
+        let byPid = cfDict as NSDictionary
+
+        let myPid = ProcessInfo.processInfo.processIdentifier
+        var result: [pid_t: SleepBlocker] = [:]
+
+        for (key, value) in byPid {
+            guard let pidNum = key as? NSNumber,
+                  let assertions = value as? [[String: Any]] else { continue }
+            let pid = pidNum.int32Value
+            if pid == myPid { continue }
+
+            let relevant = assertions.filter { a in
+                guard let type = a[kAssertTypeKey] as? String else { return false }
+                return kSleepBlockingTypes.contains(type)
+            }
+            guard !relevant.isEmpty else { continue }
+
+            let onlyDisplay = relevant.allSatisfy {
+                (($0[kAssertTypeKey] as? String) ?? "").contains("Display")
+            }
+            let running = NSRunningApplication(processIdentifier: pid)
+            let name = running?.localizedName
+                ?? processName(for: pid)
+                ?? (relevant.first?[kAssertNameKey] as? String)
+                ?? "PID \(pid)"
+
+            result[pid] = SleepBlocker(
+                pid: pid,
+                appName: name,
+                detail: onlyDisplay ? "화면 켜둠" : "잠자기 막음",
+                quittable: running != nil)
+        }
+
+        return result.values.sorted {
+            $0.appName.localizedCaseInsensitiveCompare($1.appName) == .orderedAscending
+        }
+    }
+
+    /// GUI 앱이 아닌(데몬·CLI) 프로세스의 실행 파일 이름을 얻는 폴백.
+    func processName(for pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4096) // PROC_PIDPATHINFO_MAXSIZE
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        let path = String(cString: buffer)
+        return path.isEmpty ? nil : (path as NSString).lastPathComponent
+    }
+
+    @objc func quitBlocker(_ sender: NSMenuItem) {
+        let pid = pid_t(sender.tag)
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return }
+        let name = app.localizedName ?? "이 앱"
+        let alert = NSAlert()
+        alert.messageText = "\(name)을(를) 종료할까요?"
+        alert.informativeText = "이 앱이 Mac의 잠자기를 막고 있습니다. 종료하면 잠자기 방지가 풀립니다."
+        alert.addButton(withTitle: "종료")
+        alert.addButton(withTitle: "취소")
+        if alert.runModal() == .alertFirstButtonReturn {
+            if !app.terminate() {
+                app.forceTerminate()
+            }
+        }
+    }
+
+    // MARK: - 액션
 
     @objc func toggle() {
         if enabled {
