@@ -3,7 +3,7 @@
 # brew install --cask <계정>/tap/agentcaffeine 으로 설치 가능
 cask "agentcaffeine" do
   version "1.0"
-  sha256 "PLACEHOLDER_SHA256" # notarize.sh 출력의 SHA256 값
+  sha256 "352e25ed57003b35cd7ba7e4bf573bf7661dafab50670d0837af861ddd91a613"
 
   url "https://github.com/youtube-jocoding/AgentCaffeine/releases/download/v#{version}/AgentCaffeine-#{version}.dmg"
   name "AgentCaffeine"

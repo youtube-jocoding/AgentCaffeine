@@ -29,7 +29,7 @@ cleanup() {
 trap cleanup EXIT
 
 # 정식 서명 확인 (ad-hoc 빌드는 공증 불가)
-if ! codesign -dv "$APP" 2>&1 | grep -q "Authority=Developer ID Application"; then
+if ! codesign -dv --verbose=4 "$APP" 2>&1 | grep -q "Authority=Developer ID Application"; then
     echo "오류: $APP 이 Developer ID로 서명되어 있지 않습니다. 인증서 설치 후 ./build.sh 를 다시 실행하세요."
     exit 1
 fi
