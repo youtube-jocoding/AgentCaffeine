@@ -18,12 +18,16 @@ VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Co
 DMG="AgentCaffeine-$VERSION.dmg"
 PROFILE="${NOTARY_PROFILE:-agentcaffeine}"
 ZIP=AgentCaffeine.zip
-STAGE=""
+WORK_DIR=""
+DMG_MOUNT=""
 
 cleanup() {
     rm -f "$ZIP"
-    if [ -n "$STAGE" ]; then
-        rm -rf "$STAGE"
+    if [ -n "$DMG_MOUNT" ] && [ -d "$DMG_MOUNT" ]; then
+        hdiutil detach "$DMG_MOUNT" -quiet 2>/dev/null || hdiutil detach "$DMG_MOUNT" -force -quiet 2>/dev/null || true
+    fi
+    if [ -n "$WORK_DIR" ]; then
+        rm -rf "$WORK_DIR"
     fi
 }
 trap cleanup EXIT
@@ -45,10 +49,64 @@ xcrun stapler staple "$APP"
 
 echo "==> 4/5 DMG 생성"
 rm -f "$DMG"
-STAGE=$(mktemp -d)
-cp -R "$APP" "$STAGE/"
-ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname AgentCaffeine -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+find /Volumes -maxdepth 1 -type d -name "AgentCaffeine*" -print0 | while IFS= read -r -d '' volume; do
+    hdiutil detach "$volume" -quiet 2>/dev/null || hdiutil detach "$volume" -force -quiet 2>/dev/null || true
+done
+WORK_DIR=$(mktemp -d)
+RW_DMG="$WORK_DIR/AgentCaffeine-rw.dmg"
+
+hdiutil create -volname AgentCaffeine -size 32m -fs HFS+ -ov "$RW_DMG"
+ATTACH_OUTPUT=$(hdiutil attach "$RW_DMG" -readwrite -noverify -noautoopen)
+DMG_MOUNT=$(echo "$ATTACH_OUTPUT" | awk '/\/Volumes\// { print substr($0, index($0, "/Volumes/")); exit }')
+if [ -z "$DMG_MOUNT" ]; then
+    echo "오류: DMG 마운트 위치를 찾지 못했습니다."
+    echo "$ATTACH_OUTPUT"
+    exit 1
+fi
+sleep 1
+
+cp -R "$APP" "$DMG_MOUNT/"
+ln -s /Applications "$DMG_MOUNT/Applications"
+mkdir -p "$DMG_MOUNT/.background"
+swift dmg_background.swift "$DMG_MOUNT/.background/background.png"
+
+osascript <<APPLESCRIPT
+tell application "Finder"
+    tell disk "AgentCaffeine"
+        open
+        set current view of container window to icon view
+        set toolbar visible of container window to false
+        set statusbar visible of container window to false
+        set bounds of container window to {100, 100, 848, 514}
+        set viewOptions to the icon view options of container window
+        set arrangement of viewOptions to not arranged
+        set icon size of viewOptions to 96
+        set background picture of viewOptions to POSIX file "$DMG_MOUNT/.background/background.png"
+        set position of item "AgentCaffeine.app" of container window to {180, 190}
+        set position of item "Applications" of container window to {560, 190}
+        close
+        open
+        update without registering applications
+        delay 1
+        close
+    end tell
+end tell
+APPLESCRIPT
+
+sync
+for _ in 1 2 3 4 5; do
+    if hdiutil detach "$DMG_MOUNT" -quiet; then
+        DMG_MOUNT=""
+        break
+    fi
+    sleep 1
+done
+if [ -n "$DMG_MOUNT" ]; then
+    hdiutil detach "$DMG_MOUNT" -force -quiet
+    DMG_MOUNT=""
+fi
+
+hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG"
 
 echo "==> 5/5 DMG Apple 공증 제출 및 스테이플 (수 분 소요)"
 xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait

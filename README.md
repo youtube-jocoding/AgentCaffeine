@@ -98,7 +98,7 @@ xcrun notarytool store-credentials agentcaffeine \
 
 ```bash
 ./build.sh      # Developer ID 서명 빌드
-./notarize.sh   # 앱/DMG 공증 → 스테이플 → AgentCaffeine-1.0.dmg 생성
+./notarize.sh   # 앱/DMG 공증 → 스테이플 → AgentCaffeine-<버전>.dmg 생성
 ```
 
 완료되면 어느 Mac에서나 경고 없이 실행되는 DMG가 나옵니다.
