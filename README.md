@@ -106,8 +106,7 @@ xcrun notarytool store-credentials agentcaffeine \
 ### 5. 배포
 
 - **GitHub Releases**: 저장소를 만들고 DMG를 릴리스에 업로드
-- **Homebrew**: `Casks/agentcaffeine.rb` 의 PLACEHOLDER(GitHub 계정, SHA256)를 채우고
-  본인의 tap 저장소(`github.com/<계정>/homebrew-tap`)에 올리면:
+- **Homebrew**: `Casks/agentcaffeine.rb` 를 본인의 tap 저장소(`github.com/<계정>/homebrew-tap`)에 올리면:
   ```bash
   brew install --cask <계정>/tap/agentcaffeine
   ```
@@ -126,7 +125,7 @@ xcrun notarytool store-credentials agentcaffeine \
 | `build.sh` | 빌드 + 서명 (인증서 자동 감지) |
 | `notarize.sh` | 공증 + DMG 패키징 |
 | `gen_icon.swift` | 앱 아이콘 생성 (`swift gen_icon.swift`) |
-| `Casks/agentcaffeine.rb` | Homebrew cask 템플릿 |
+| `Casks/agentcaffeine.rb` | Homebrew cask |
 
 ## 동작 원리
 
