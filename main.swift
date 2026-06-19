@@ -19,6 +19,7 @@ import Darwin
 // 루트 watchdog에게 "지금 해제하라"고 알리는 신호 파일.
 // 앱(사용자 권한)이 생성하고, watchdog(루트)가 감지 후 삭제한다.
 let kReleaseFlagPath = "/tmp/com.jocoding.agentcaffeine.release"
+let kDisableSleepCommand = "/usr/bin/pmset -a disablesleep 0"
 
 // IOPMCopyAssertionsByProcess가 돌려주는 per-assertion 딕셔너리의 키/값.
 // (CFSTR 매크로는 Swift로 임포트되지 않으므로 원시 문자열을 직접 쓴다.)
@@ -66,6 +67,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func populate(_ menu: NSMenu) {
+        enabled = currentSleepDisabled()
         menu.removeAllItems()
 
         toggleItem.target = self
@@ -202,10 +204,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // 정상 종료: 즉시 해제 신호를 남긴다(watchdog가 곧바로 disablesleep 0 복구).
-        // 신호를 못 남기는 비정상 종료라도 watchdog의 PID 감시로 동일하게 복구되므로 안전하다.
+        // 정상 종료: 먼저 watchdog 해제 신호를 남기고, 실제 해제가 확인되지 않으면 직접 복구한다.
+        // 비정상 종료는 watchdog가 복구하지만, watchdog 자체가 없어진 경우에는 다음 실행의 자가 치유가 필요하다.
         if enabled {
             requestRelease()
+            if !waitForSleepDisabled(false, timeout: 3) {
+                _ = runPrivileged(kDisableSleepCommand)
+            }
         }
     }
 
@@ -216,26 +221,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 단 한 번의 관리자 권한 요청으로 두 가지를 처리한다.
         //   1) disablesleep 1  — 덮개 닫힘 잠자기까지 막는 macOS의 유일한 방법
         //   2) 루트 watchdog 기동 — 이 앱(PID)이 사라지거나 release 플래그가 생기면
-        //      스스로 disablesleep 0 으로 복구한다. 따라서 크래시·강제종료에도
-        //      설정이 영구히 남는("stuck") 상황이 구조적으로 발생하지 않는다.
+        //      스스로 disablesleep 0 으로 복구한다. 끄기/정상 종료 시에는 앱도 실제 해제 여부를
+        //      확인하고, watchdog가 없으면 관리자 권한 fallback으로 직접 복구한다.
         let watchdog =
             "/bin/bash -c 'while /bin/kill -0 \(pid) 2>/dev/null; do " +
-            "[ -f \(kReleaseFlagPath) ] && break; /bin/sleep 3; done; " +
-            "/usr/bin/pmset -a disablesleep 0; /bin/rm -f \(kReleaseFlagPath)'"
+            "[ -f \(kReleaseFlagPath) ] && break; /bin/sleep 1; done; " +
+            "\(kDisableSleepCommand); /bin/rm -f \(kReleaseFlagPath)'"
         let shell =
-            "/bin/rm -f \(kReleaseFlagPath); " +
-            "/usr/bin/pmset -a disablesleep 1; " +
-            "/usr/bin/nohup \(watchdog) >/dev/null 2>&1 &"
-        if runPrivileged(shell) {
+            "set -e; /bin/rm -f \(kReleaseFlagPath); " +
+            "/usr/bin/nohup \(watchdog) >/dev/null 2>&1 & " +
+            "/usr/bin/pmset -a disablesleep 1"
+        if runPrivileged(shell), waitForSleepDisabled(true, timeout: 2) {
             enabled = true
-            updateUI()
+        } else {
+            enabled = currentSleepDisabled()
+            showError(
+                title: "잠자기 방지를 켜지 못했습니다",
+                message: "시스템 설정을 확인하지 못했습니다. 현재 상태를 다시 확인해 주세요."
+            )
         }
+        updateUI()
     }
 
     func disableKeepAwake() {
-        // 비밀번호 없이 해제: release 플래그만 남기면 루트 watchdog가 disablesleep 0 으로 복구한다.
+        // 우선 release 플래그로 watchdog에게 해제를 맡긴다. 확인에 실패하면 관리자 권한 fallback으로 복구한다.
         requestRelease()
-        enabled = false
+        if !waitForSleepDisabled(false, timeout: 3) {
+            _ = runPrivileged(kDisableSleepCommand)
+        }
+        enabled = currentSleepDisabled()
+        if enabled {
+            showError(
+                title: "잠자기 방지를 해제하지 못했습니다",
+                message: "관리자 권한 해제까지 실패했습니다. 터미널에서 sudo pmset -a disablesleep 0 을 실행해 주세요."
+            )
+        } else {
+            cleanupStaleReleaseFlag()
+        }
         updateUI()
     }
 
@@ -258,7 +280,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.addButton(withTitle: "해제 (권장)")
         alert.addButton(withTitle: "켠 상태로 관리")
         if alert.runModal() == .alertFirstButtonReturn {
-            if runPrivileged("/usr/bin/pmset -a disablesleep 0") {
+            if runPrivileged(kDisableSleepCommand) {
                 enabled = false
             } else {
                 enabled = currentSleepDisabled()
@@ -273,11 +295,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @discardableResult
     func runPrivileged(_ shell: String) -> Bool {
-        let source = "do shell script \"\(shell)\" with administrator privileges"
+        let escaped = shell
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let source = "do shell script \"\(escaped)\" with administrator privileges"
         var error: NSDictionary?
         guard let appleScript = NSAppleScript(source: source) else { return false }
         appleScript.executeAndReturnError(&error)
         return error == nil
+    }
+
+    func waitForSleepDisabled(_ expected: Bool, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if currentSleepDisabled() == expected {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return currentSleepDisabled() == expected
     }
 
     func currentSleepDisabled() -> Bool {
@@ -309,6 +345,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - UI
+
+    func showError(title: String, message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "확인")
+        alert.runModal()
+    }
 
     func updateUI() {
         let symbol = enabled ? "cup.and.saucer.fill" : "cup.and.saucer"

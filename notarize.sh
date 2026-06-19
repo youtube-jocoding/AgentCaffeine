@@ -20,6 +20,8 @@ PROFILE="${NOTARY_PROFILE:-agentcaffeine}"
 ZIP=AgentCaffeine.zip
 WORK_DIR=""
 DMG_MOUNT=""
+IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')}"
 
 cleanup() {
     rm -f "$ZIP"
@@ -33,7 +35,7 @@ cleanup() {
 trap cleanup EXIT
 
 # 정식 서명 확인 (ad-hoc 빌드는 공증 불가)
-if ! codesign -dv --verbose=4 "$APP" 2>&1 | grep -q "Authority=Developer ID Application"; then
+if [ -z "$IDENTITY" ] || ! codesign -dv --verbose=4 "$APP" 2>&1 | grep -q "Authority=Developer ID Application"; then
     echo "오류: $APP 이 Developer ID로 서명되어 있지 않습니다. 인증서 설치 후 ./build.sh 를 다시 실행하세요."
     exit 1
 fi
@@ -107,6 +109,7 @@ if [ -n "$DMG_MOUNT" ]; then
 fi
 
 hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG"
+codesign --force --timestamp --sign "$IDENTITY" "$DMG"
 
 echo "==> 5/5 DMG Apple 공증 제출 및 스테이플 (수 분 소요)"
 xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait

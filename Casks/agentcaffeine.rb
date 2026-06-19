@@ -2,8 +2,8 @@
 # 자신의 tap 저장소(예: github.com/<계정>/homebrew-tap)의 Casks/ 폴더에 두면
 # brew install --cask <계정>/tap/agentcaffeine 으로 설치 가능
 cask "agentcaffeine" do
-  version "1.0.1"
-  sha256 "598d0a0ca598c569bc20c25fe2f7ce8fbd3e81c1dd663b9c887155ce90d2473f"
+  version "1.0.2"
+  sha256 "5901d71f9b9336829ed70d24e209f02eb899bd80492fa2f91050d3829c5dbdee"
 
   url "https://github.com/youtube-jocoding/AgentCaffeine/releases/download/v#{version}/AgentCaffeine-#{version}.dmg"
   name "AgentCaffeine"
