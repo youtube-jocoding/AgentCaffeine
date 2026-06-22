@@ -1,7 +1,7 @@
 # Homebrew cask for AgentCaffeine releases.
 cask "agentcaffeine" do
-  version "1.0.2"
-  sha256 "5901d71f9b9336829ed70d24e209f02eb899bd80492fa2f91050d3829c5dbdee"
+  version "1.0.3"
+  sha256 "c3cc2ec885b4226abab76c6a404459e200360efdb0aad61bea594d98324b5df3"
 
   url "https://github.com/youtube-jocoding/AgentCaffeine/releases/download/v#{version}/AgentCaffeine-#{version}.dmg"
   name "AgentCaffeine"
