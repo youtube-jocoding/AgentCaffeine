@@ -22,6 +22,7 @@ let kReleaseFlagPath = "/tmp/com.jocoding.agentcaffeine.release"
 let kDisableSleepCommand = "/usr/bin/pmset -a disablesleep 0"
 let kBatteryProtectionCommand =
     "/usr/bin/pmset -a disablesleep 0; " +
+    "/usr/bin/pmset -a displaysleep 5; " +
     "/usr/bin/pmset -b displaysleep 1 sleep 1 powernap 0 tcpkeepalive 0 ttyskeepawake 0"
 private let kPowerModeDefaultsKey = "PowerMode"
 private let kAutomaticPollInterval: TimeInterval = 15
@@ -362,7 +363,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "배터리 보호 설정을 적용할까요?"
         alert.informativeText =
-            "배터리 사용 시 화면 잠자기와 시스템 잠자기를 1분으로 돌리고, Power Nap·TCP keepalive·TTY 유지 깨우기를 끕니다. 덮개 닫힘 방지도 해제합니다."
+            "전원 연결 시 화면 잠자기를 5분으로, 배터리 사용 시 화면/시스템 잠자기를 1분으로 돌립니다. Power Nap·TCP keepalive·TTY 유지 깨우기도 끄고, 덮개 닫힘 방지도 해제합니다."
         alert.addButton(withTitle: "적용")
         alert.addButton(withTitle: "취소")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -682,22 +683,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         UserDefaults.standard.set(mode.rawValue, forKey: kPowerModeDefaultsKey)
     }
 
-    func batteryPowerSettings() -> [String: Int] {
+    func powerSettings(sectionHeader: String) -> [String: Int] {
         guard let output = commandOutput("/usr/bin/pmset", arguments: ["-g", "custom"]) else { return [:] }
-        var inBatterySection = false
+        var inTargetSection = false
         var settings: [String: Int] = [:]
 
         for rawLine in output.split(separator: "\n") {
             let line = String(rawLine)
-            if line.hasPrefix("Battery Power:") {
-                inBatterySection = true
+            if line.hasPrefix(sectionHeader) {
+                inTargetSection = true
                 continue
             }
-            if line.hasPrefix("AC Power:") {
-                inBatterySection = false
+            if line.hasSuffix("Power:") {
+                inTargetSection = false
                 continue
             }
-            guard inBatterySection else { continue }
+            guard inTargetSection else { continue }
             let parts = line.split { $0 == " " || $0 == "\t" }
             guard parts.count >= 2, let value = Int(parts.last ?? "") else { continue }
             settings[String(parts[0])] = value
@@ -705,15 +706,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return settings
     }
 
+    func batteryPowerSettings() -> [String: Int] {
+        powerSettings(sectionHeader: "Battery Power:")
+    }
+
+    func acPowerSettings() -> [String: Int] {
+        powerSettings(sectionHeader: "AC Power:")
+    }
+
     func batteryProtectionWarningText() -> String? {
-        let settings = batteryPowerSettings()
-        if settings["displaysleep"] == 0 {
+        let battery = batteryPowerSettings()
+        let ac = acPowerSettings()
+        if ac["displaysleep"] == 0 {
+            return "전원 연결 시 화면 잠자기 안 함"
+        }
+        if battery["displaysleep"] == 0 {
             return "배터리에서 화면 잠자기 안 함"
         }
-        if settings["sleep"] == 0 {
+        if battery["sleep"] == 0 {
             return "배터리에서 시스템 잠자기 안 함"
         }
-        if settings["powernap"] == 1 || settings["tcpkeepalive"] == 1 {
+        if battery["powernap"] == 1 || battery["tcpkeepalive"] == 1 {
             return "배터리에서 백그라운드 깨우기 허용"
         }
         return nil

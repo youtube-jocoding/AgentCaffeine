@@ -80,7 +80,7 @@ open AgentCaffeine.app
 - **화면 켜짐 동안만 깨어있기**: 앱이 idle sleep만 막습니다. 덮개를 닫으면 정상적으로 잠듭니다.
 - **덮개 닫아도 깨어있기**: `pmset disablesleep`을 사용해 클램셸 잠자기까지 막습니다.
 - **강제 잠자기**: AgentCaffeine의 잠자기 방지를 풀고, 배터리 보호 설정을 적용한 뒤 `pmset sleepnow`를 실행합니다.
-- **배터리 보호 설정 적용**: 배터리 사용 시 `displaysleep 1`, `sleep 1`, `powernap 0`, `tcpkeepalive 0`, `ttyskeepawake 0`을 적용하고 `disablesleep`을 해제합니다.
+- **배터리 보호 설정 적용**: 전원 연결 시 `displaysleep 5`, 배터리 사용 시 `displaysleep 1`, `sleep 1`, `powernap 0`, `tcpkeepalive 0`, `ttyskeepawake 0`을 적용하고 `disablesleep`을 해제합니다.
 
 메뉴의 **"지금 잠자기를 막는 중"** 목록에서 다른 앱이 Mac을 깨워두는 것도 확인하고, 일반 앱이면 클릭해서 바로 종료할 수 있습니다.
 
